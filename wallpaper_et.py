@@ -7,9 +7,10 @@ from PyQt6.QtCore import Qt, QTimer, QPoint, QEvent, QObject, QRect, QRectF
 from PyQt6.QtGui import QFont, QColor, QPainter, QGuiApplication, QPainterPath, QIcon, QAction
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QDialog, QMenu
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QCheckBox, QColorDialog, QFileDialog, QSlider
-from PyQt6.QtWidgets import QSystemTrayIcon, QComboBox
+from PyQt6.QtWidgets import QSystemTrayIcon, QComboBox, QListWidget
 from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QPointF, QTimer, QSequentialAnimationGroup
 from PyQt6.QtGui import QPainterPath, QPainter, QColor, QBrush, QPen
+from PyQt6.QtWidgets import QTextEdit, QToolButton, QScrollArea, QFrame
 
 import ctypes
 from datetime import datetime
@@ -22,7 +23,7 @@ VK_MEDIA_PREV_TRACK = 0xB1  # 上一曲媒体键
 # 设置文件路径
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wallpaper_settings.json")
 
-# 默认设置
+
 DEFAULT_SETTINGS = {
     "netease_music_path": "D:\\CloudMusic\\cloudmusic.exe",
     "everything_path": "D:\\BaiscTools\\Everything\\Everything.exe",
@@ -34,7 +35,14 @@ DEFAULT_SETTINGS = {
         "a": 120
     },
     "autostart": False,
-    "default_search_engine": "everything"
+    "default_search_engine": "everything",
+    "quick_tools": [
+        {"name": "VS Code", "path": "C:\\Program Files\\Microsoft VS Code\\Code.exe", "icon": "💻"},
+        {"name": "Terminal", "path": "C:\\Windows\\System32\\cmd.exe", "icon": "🖥️"},
+        {"name": "计算器", "path": "C:\\Windows\\System32\\calc.exe", "icon": "🧮"},
+        {"name": "记事本", "path": "C:\\Windows\\System32\\notepad.exe", "icon": "📝"}
+    ],
+    "notes": ""  # 用于存储快速笔记内容
 }
 
 def save_settings(settings):
@@ -208,6 +216,265 @@ class CustomLineEdit(QLineEdit):
         
         # 调用原始绘制方法来绘制文本
         super().paintEvent(event)
+
+class QuickToolsDialog(QDialog):
+    def __init__(self, tools, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("编辑常用工具")
+        self.setFixedSize(500, 400)
+        
+        # 复制工具列表
+        self.tools = tools.copy()
+        
+        # 设置窗口样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2c2c2c;
+                color: white;
+            }
+            QLabel {
+                color: white;
+            }
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+            QLineEdit {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 3px;
+            }
+            QListWidget {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555555;
+                border-radius: 3px;
+            }
+            QListWidget::item:selected {
+                background-color: #5f9ea0;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        
+        # 工具列表
+        self.tools_list = QListWidget()
+        self.update_tools_list()
+        layout.addWidget(self.tools_list)
+        
+        # 编辑区域
+        edit_layout = QHBoxLayout()
+        
+        # 名称输入
+        name_layout = QVBoxLayout()
+        name_layout.addWidget(QLabel("名称:"))
+        self.name_edit = QLineEdit()
+        name_layout.addWidget(self.name_edit)
+        edit_layout.addLayout(name_layout)
+        
+        # 图标输入
+        icon_layout = QVBoxLayout()
+        icon_layout.addWidget(QLabel("图标:"))
+        self.icon_edit = QLineEdit()
+        icon_layout.addWidget(self.icon_edit)
+        edit_layout.addLayout(icon_layout)
+        
+        # 路径输入
+        path_layout = QVBoxLayout()
+        path_layout.addWidget(QLabel("路径:"))
+        path_input_layout = QHBoxLayout()
+        self.path_edit = QLineEdit()
+        path_input_layout.addWidget(self.path_edit)
+        self.browse_button = QPushButton("浏览...")
+        self.browse_button.clicked.connect(self.browse_path)
+        path_input_layout.addWidget(self.browse_button)
+        path_layout.addLayout(path_input_layout)
+        edit_layout.addLayout(path_layout)
+        
+        layout.addLayout(edit_layout)
+        
+        # 按钮区域
+        buttons_layout = QHBoxLayout()
+        
+        self.add_button = QPushButton("添加")
+        self.add_button.clicked.connect(self.add_tool)
+        buttons_layout.addWidget(self.add_button)
+        
+        self.update_button = QPushButton("更新")
+        self.update_button.clicked.connect(self.update_tool)
+        self.update_button.setEnabled(False)  # 初始禁用
+        buttons_layout.addWidget(self.update_button)
+        
+        self.delete_button = QPushButton("删除")
+        self.delete_button.clicked.connect(self.delete_tool)
+        self.delete_button.setEnabled(False)  # 初始禁用
+        buttons_layout.addWidget(self.delete_button)
+        
+        self.up_button = QPushButton("上移")
+        self.up_button.clicked.connect(self.move_tool_up)
+        self.up_button.setEnabled(False)  # 初始禁用
+        buttons_layout.addWidget(self.up_button)
+        
+        self.down_button = QPushButton("下移")
+        self.down_button.clicked.connect(self.move_tool_down)
+        self.down_button.setEnabled(False)  # 初始禁用
+        buttons_layout.addWidget(self.down_button)
+        
+        layout.addLayout(buttons_layout)
+        
+        # 确定取消按钮
+        dialog_buttons = QHBoxLayout()
+        self.ok_button = QPushButton("确定")
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.clicked.connect(self.reject)
+        dialog_buttons.addWidget(self.ok_button)
+        dialog_buttons.addWidget(self.cancel_button)
+        layout.addLayout(dialog_buttons)
+        
+        self.setLayout(layout)
+        
+        # 连接列表选择信号
+        self.tools_list.itemSelectionChanged.connect(self.selection_changed)
+        self.tools_list.itemDoubleClicked.connect(self.item_double_clicked)
+    
+    def update_tools_list(self):
+        """更新工具列表显示"""
+        self.tools_list.clear()
+        for tool in self.tools:
+            self.tools_list.addItem(f"{tool['icon']} {tool['name']} - {tool['path']}")
+    
+    def selection_changed(self):
+        """列表选择变化处理"""
+        has_selection = len(self.tools_list.selectedItems()) > 0
+        self.update_button.setEnabled(has_selection)
+        self.delete_button.setEnabled(has_selection)
+        
+        # 上移按钮仅在非第一项被选中时启用
+        self.up_button.setEnabled(has_selection and self.tools_list.currentRow() > 0)
+        
+        # 下移按钮仅在非最后一项被选中时启用
+        self.down_button.setEnabled(has_selection and self.tools_list.currentRow() < self.tools_list.count() - 1)
+        
+        # 如果有选择，填充编辑区域
+        if has_selection:
+            index = self.tools_list.currentRow()
+            tool = self.tools[index]
+            self.name_edit.setText(tool["name"])
+            self.icon_edit.setText(tool["icon"])
+            self.path_edit.setText(tool["path"])
+    
+    def item_double_clicked(self, item):
+        """双击列表项处理"""
+        # 填充编辑区域
+        index = self.tools_list.row(item)
+        tool = self.tools[index]
+        self.name_edit.setText(tool["name"])
+        self.icon_edit.setText(tool["icon"])
+        self.path_edit.setText(tool["path"])
+    
+    def browse_path(self):
+        """浏览文件路径"""
+        path, _ = QFileDialog.getOpenFileName(self, "选择程序", "", "可执行文件 (*.exe)")
+        if path:
+            self.path_edit.setText(path)
+    
+    def add_tool(self):
+        """添加新工具"""
+        name = self.name_edit.text().strip()
+        icon = self.icon_edit.text().strip()
+        path = self.path_edit.text().strip()
+        
+        if not name or not path:
+            return
+        
+        # 使用默认图标如果未提供
+        if not icon:
+            icon = "🔧"
+        
+        # 添加到列表
+        self.tools.append({"name": name, "icon": icon, "path": path})
+        self.update_tools_list()
+        
+        # 清空输入框
+        self.name_edit.clear()
+        self.icon_edit.clear()
+        self.path_edit.clear()
+    
+    def update_tool(self):
+        """更新选中的工具"""
+        if not self.tools_list.selectedItems():
+            return
+        
+        index = self.tools_list.currentRow()
+        name = self.name_edit.text().strip()
+        icon = self.icon_edit.text().strip()
+        path = self.path_edit.text().strip()
+        
+        if not name or not path:
+            return
+        
+        # 使用默认图标如果未提供
+        if not icon:
+            icon = "🔧"
+        
+        # 更新工具
+        self.tools[index] = {"name": name, "icon": icon, "path": path}
+        self.update_tools_list()
+    
+    def delete_tool(self):
+        """删除选中的工具"""
+        if not self.tools_list.selectedItems():
+            return
+        
+        index = self.tools_list.currentRow()
+        del self.tools[index]
+        self.update_tools_list()
+        
+        # 清空输入框
+        self.name_edit.clear()
+        self.icon_edit.clear()
+        self.path_edit.clear()
+    
+    def move_tool_up(self):
+        """上移选中的工具"""
+        if not self.tools_list.selectedItems():
+            return
+        
+        index = self.tools_list.currentRow()
+        if index <= 0:
+            return
+        
+        # 交换位置
+        self.tools[index], self.tools[index-1] = self.tools[index-1], self.tools[index]
+        self.update_tools_list()
+        
+        # 保持选择
+        self.tools_list.setCurrentRow(index-1)
+    
+    def move_tool_down(self):
+        """下移选中的工具"""
+        if not self.tools_list.selectedItems():
+            return
+        
+        index = self.tools_list.currentRow()
+        if index >= len(self.tools) - 1:
+            return
+        
+        # 交换位置
+        self.tools[index], self.tools[index+1] = self.tools[index+1], self.tools[index]
+        self.update_tools_list()
+        
+        # 保持选择
+        self.tools_list.setCurrentRow(index+1)
 
 class MusicButton(QPushButton):
     def __init__(self, parent=None):
@@ -657,6 +924,120 @@ class AcrylicWidget(QWidget):
         self.next_button.move(265, 120)
         self.next_button.clicked.connect(self.next_track)
 
+        # 添加下拉按钮
+        self.expand_button = QPushButton("▼", self)
+        self.expand_button.setFont(QFont("Segoe UI", 10))
+        self.expand_button.setStyleSheet("""
+            QPushButton {
+                color: rgba(200, 200, 255, 200);
+                background-color: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                color: rgba(220, 220, 255, 230);
+            }
+        """)
+        self.expand_button.setFixedSize(20, 20)
+        self.expand_button.move(self.width() - 35, 165)
+        self.expand_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.expand_button.setToolTip("展开/收起拓展功能")
+        self.expand_button.clicked.connect(self.toggle_extension_panel)
+        
+        # 创建拓展功能面板（初始隐藏）
+        self.extension_panel = QWidget(self)
+        self.extension_panel.setStyleSheet("""
+            background-color: rgba(30, 30, 40, 180);
+            border-radius: 10px;
+        """)
+        self.extension_panel.setFixedWidth(self.width() - 20)
+        self.extension_panel.setFixedHeight(300)  # 拓展面板高度
+        self.extension_panel.move(10, self.height())  # 初始位置在窗口下方（隐藏状态）
+        
+        # 拓展面板布局
+        extension_layout = QVBoxLayout(self.extension_panel)
+        extension_layout.setContentsMargins(10, 10, 10, 10)
+        extension_layout.setSpacing(10)
+        
+        # 添加标题
+        tools_title = QLabel("常用工具", self.extension_panel)
+        tools_title.setFont(QFont("Caveat", 14, QFont.Weight.Bold))
+        tools_title.setStyleSheet("color: rgba(200, 220, 255, 220);")
+        extension_layout.addWidget(tools_title)
+        
+        # 常用工具区域
+        self.tools_container = QWidget(self.extension_panel)
+        tools_layout = QHBoxLayout(self.tools_container)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(10)
+        
+        # 从设置中加载常用工具
+        self.quick_tools = self.settings.get("quick_tools", DEFAULT_SETTINGS["quick_tools"])
+        for tool in self.quick_tools:
+            tool_button = self.create_tool_button(tool)
+            tools_layout.addWidget(tool_button)
+        
+        # 添加编辑工具按钮
+        edit_tools_button = QPushButton("⚙️", self.tools_container)
+        edit_tools_button.setToolTip("编辑常用工具")
+        edit_tools_button.setFixedSize(40, 40)
+        edit_tools_button.setStyleSheet("""
+            QPushButton {
+                color: rgba(180, 180, 180, 200);
+                background-color: rgba(60, 60, 70, 150);
+                border-radius: 5px;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: rgba(80, 80, 90, 180);
+            }
+        """)
+        edit_tools_button.clicked.connect(self.edit_quick_tools)
+        tools_layout.addWidget(edit_tools_button)
+        
+        # 添加弹性空间
+        tools_layout.addStretch()
+        extension_layout.addWidget(self.tools_container)
+        
+        # 添加分隔线
+        separator = QFrame(self.extension_panel)
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet("background-color: rgba(100, 100, 120, 100);")
+        extension_layout.addWidget(separator)
+        
+        # 添加快速笔记标题
+        notes_title = QLabel("快速笔记", self.extension_panel)
+        notes_title.setFont(QFont("Caveat", 14, QFont.Weight.Bold))
+        notes_title.setStyleSheet("color: rgba(200, 220, 255, 220);")
+        extension_layout.addWidget(notes_title)
+        
+        # 添加快速笔记文本编辑区
+        self.notes_edit = QTextEdit(self.extension_panel)
+        self.notes_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: rgba(40, 40, 50, 150);
+                color: rgba(220, 220, 220, 220);
+                border-radius: 5px;
+                padding: 5px;
+                selection-background-color: rgba(70, 130, 180, 150);
+            }
+        """)
+        self.notes_edit.setFont(QFont("Consolas", 10))
+        self.notes_edit.setPlaceholderText("在这里记录临时想法、代码片段或待办事项...")
+        
+        # 从设置中加载笔记内容
+        self.notes_edit.setText(self.settings.get("notes", ""))
+        self.notes_edit.textChanged.connect(self.save_notes)
+        
+        extension_layout.addWidget(self.notes_edit)
+        
+        # 拓展面板动画
+        self.panel_animation = QPropertyAnimation(self.extension_panel, b"geometry")
+        self.panel_animation.setDuration(300)
+        self.panel_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        # 面板状态
+        self.panel_expanded = False
+
         timer = QTimer(self)
         timer.timeout.connect(self.update_info)
         timer.start(1000)
@@ -755,6 +1136,142 @@ class AcrylicWidget(QWidget):
         except Exception as e:
             print(f"打开浏览器失败: {e}")
 
+    def toggle_extension_panel(self):
+        """切换拓展功能面板的显示/隐藏状态"""
+        if self.panel_expanded:
+            # 收起面板
+            self.collapse_panel()
+        else:
+            # 展开面板
+            self.expand_panel()
+
+    def expand_panel(self):
+        """展开拓展功能面板"""
+        # 计算展开后的几何形状
+        new_height = self.height() + self.extension_panel.height() + 10
+        self.setFixedSize(self.width(), new_height)
+        
+        # 设置面板位置动画
+        start_rect = self.extension_panel.geometry()
+        end_rect = QRect(10, self.height() - self.extension_panel.height() - 10, 
+                        self.extension_panel.width(), self.extension_panel.height())
+        
+        self.panel_animation.setStartValue(start_rect)
+        self.panel_animation.setEndValue(end_rect)
+        self.panel_animation.start()
+        
+        # 更新按钮文本
+        self.expand_button.setText("▲")
+        self.panel_expanded = True
+
+    def collapse_panel(self):
+        """收起拓展功能面板"""
+        # 设置面板位置动画
+        start_rect = self.extension_panel.geometry()
+        end_rect = QRect(10, self.height(), 
+                        self.extension_panel.width(), self.extension_panel.height())
+        
+        self.panel_animation.setStartValue(start_rect)
+        self.panel_animation.setEndValue(end_rect)
+        self.panel_animation.start()
+        
+        # 连接动画完成信号
+        self.panel_animation.finished.connect(self.resize_after_collapse)
+        
+        # 更新按钮文本
+        self.expand_button.setText("▼")
+        self.panel_expanded = False
+
+    def resize_after_collapse(self):
+        """面板收起后调整窗口大小"""
+        # 断开信号连接，避免重复调用
+        self.panel_animation.finished.disconnect(self.resize_after_collapse)
+        
+        # 恢复原始窗口大小
+        self.setFixedSize(self.width(), 200)
+
+    def create_tool_button(self, tool):
+        """创建工具快捷按钮"""
+        button = QPushButton(tool["icon"], self.tools_container)
+        button.setToolTip(tool["name"])
+        button.setFixedSize(40, 40)
+        button.setStyleSheet("""
+            QPushButton {
+                color: rgba(220, 220, 220, 220);
+                background-color: rgba(50, 50, 60, 150);
+                border-radius: 5px;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 70, 80, 180);
+            }
+            QPushButton:pressed {
+                background-color: rgba(40, 40, 50, 150);
+            }
+        """)
+        
+        # 存储工具路径
+        button.setProperty("tool_path", tool["path"])
+        
+        # 连接点击事件
+        button.clicked.connect(lambda: self.open_tool(tool["path"]))
+        
+        return button
+
+    def open_tool(self, path):
+        """打开工具"""
+        try:
+            subprocess.Popen(path)
+        except Exception as e:
+            print(f"打开工具失败: {e}")
+
+    def edit_quick_tools(self):
+        """编辑常用工具"""
+        dialog = QuickToolsDialog(self.quick_tools, self)
+        if dialog.exec():
+            # 更新工具列表
+            self.quick_tools = dialog.tools
+            self.settings["quick_tools"] = self.quick_tools
+            save_settings(self.settings)
+            
+            # 重新创建工具按钮
+            # 清除现有按钮
+            for i in reversed(range(self.tools_container.layout().count())):
+                item = self.tools_container.layout().itemAt(i)
+                if item.widget():
+                    item.widget().deleteLater()
+            
+            # 添加新按钮
+            for tool in self.quick_tools:
+                tool_button = self.create_tool_button(tool)
+                self.tools_container.layout().addWidget(tool_button)
+            
+            # 添加编辑按钮
+            edit_tools_button = QPushButton("⚙️", self.tools_container)
+            edit_tools_button.setToolTip("编辑常用工具")
+            edit_tools_button.setFixedSize(40, 40)
+            edit_tools_button.setStyleSheet("""
+                QPushButton {
+                    color: rgba(180, 180, 180, 200);
+                    background-color: rgba(60, 60, 70, 150);
+                    border-radius: 5px;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(80, 80, 90, 180);
+                }
+            """)
+            edit_tools_button.clicked.connect(self.edit_quick_tools)
+            self.tools_container.layout().addWidget(edit_tools_button)
+            
+            # 添加弹性空间
+            self.tools_container.layout().addStretch()
+
+    def save_notes(self):
+        """保存笔记内容"""
+        self.settings["notes"] = self.notes_edit.toPlainText()
+        save_settings(self.settings)
+
     def contextMenuEvent(self, event):
         """处理右键菜单事件"""
         menu = QMenu(self)
@@ -774,19 +1291,19 @@ class AcrylicWidget(QWidget):
                 background-color: rgba(70, 130, 180, 150);
             }
         """)
-        
+            
         # 添加菜单项
         show_hide_action = menu.addAction("隐藏到托盘")
         show_hide_action.triggered.connect(self.hide)
-        
+            
         settings_action = menu.addAction("设置")
         settings_action.triggered.connect(self.open_settings)
-        
+            
         menu.addSeparator()
-        
+            
         exit_action = menu.addAction("退出")
         exit_action.triggered.connect(self.close_app)
-        
+            
         # 显示菜单
         menu.exec(event.globalPos())
     
