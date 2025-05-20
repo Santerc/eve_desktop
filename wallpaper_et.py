@@ -21,7 +21,7 @@ VK_MEDIA_NEXT_TRACK = 0xB0  # 下一曲媒体键
 VK_MEDIA_PREV_TRACK = 0xB1  # 上一曲媒体键
 
 # 设置文件路径
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wallpaper_settings.json")
+SETTINGS_FILE = "./wallpaper_settings.json"
 
 
 DEFAULT_SETTINGS = {
