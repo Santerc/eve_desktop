@@ -8,6 +8,9 @@ from PyQt6.QtGui import QFont, QColor, QPainter, QGuiApplication, QPainterPath, 
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QDialog, QMenu
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QCheckBox, QColorDialog, QFileDialog, QSlider
 from PyQt6.QtWidgets import QSystemTrayIcon, QComboBox
+from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QPointF, QTimer, QSequentialAnimationGroup
+from PyQt6.QtGui import QPainterPath, QPainter, QColor, QBrush, QPen
+
 import ctypes
 from datetime import datetime
 
@@ -68,20 +71,60 @@ class MediaControlButton(QPushButton):
                 background-color: transparent;
                 border: none;
                 padding: 2px;
+                transition: transform 0.2s;
             }
             QPushButton:hover {
                 color: rgba(150, 220, 255, 230);
                 background-color: rgba(255, 255, 255, 40);
                 border-radius: 12px;
+                transform: scale(1.1);
             }
             QPushButton:pressed {
                 color: rgba(50, 150, 255, 200);
                 background-color: rgba(255, 255, 255, 20);
+                transform: scale(0.95);
             }
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tooltip)
         self.setFixedSize(30, 30)
+        
+        # 添加悬浮动画
+        self.hover_animation = QPropertyAnimation(self, b"geometry")
+        self.hover_animation.setDuration(200)
+        
+        # 原始大小
+        self.original_geometry = None
+    
+    def enterEvent(self, event):
+        """鼠标进入事件"""
+        if not self.original_geometry:
+            self.original_geometry = self.geometry()
+        
+        # 计算放大后的几何形状
+        center = self.original_geometry.center()
+        new_size = self.original_geometry.size() * 1.1
+        new_rect = QRect(0, 0, new_size.width(), new_size.height())
+        new_rect.moveCenter(center)
+        
+        # 设置动画
+        self.hover_animation.setStartValue(self.geometry())
+        self.hover_animation.setEndValue(new_rect)
+        self.hover_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.hover_animation.start()
+        
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """鼠标离开事件"""
+        if self.original_geometry:
+            # 设置动画
+            self.hover_animation.setStartValue(self.geometry())
+            self.hover_animation.setEndValue(self.original_geometry)
+            self.hover_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self.hover_animation.start()
+        
+        super().leaveEvent(event)
 
 class EventFilter(QObject):
     def eventFilter(self, obj, event):
@@ -97,6 +140,51 @@ class CustomLineEdit(QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFrame(False)  # 移除默认边框
+        
+        # 焦点状态
+        self.has_focus = False
+        
+        # 动画效果
+        self.focus_animation = QPropertyAnimation(self, b"geometry")
+        self.focus_animation.setDuration(300)
+        self.focus_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        # 原始几何形状
+        self.original_geometry = None
+
+    def focusInEvent(self, event):
+        """获得焦点事件"""
+        self.has_focus = True
+        
+        if not self.original_geometry:
+            self.original_geometry = self.geometry()
+        
+        # 计算扩展后的几何形状
+        center = self.original_geometry.center()
+        new_width = self.original_geometry.width() + 10
+        new_rect = QRect(0, 0, new_width, self.original_geometry.height())
+        new_rect.moveCenter(center)
+        
+        # 设置动画
+        self.focus_animation.setStartValue(self.geometry())
+        self.focus_animation.setEndValue(new_rect)
+        self.focus_animation.start()
+        
+        super().focusInEvent(event)
+        self.update()
+    
+    def focusOutEvent(self, event):
+        """失去焦点事件"""
+        self.has_focus = False
+        
+        if self.original_geometry:
+            # 设置动画
+            self.focus_animation.setStartValue(self.geometry())
+            self.focus_animation.setEndValue(self.original_geometry)
+            self.focus_animation.start()
+        
+        super().focusOutEvent(event)
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -106,8 +194,17 @@ class CustomLineEdit(QLineEdit):
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), 12, 12)
         
-        # 半透明背景
-        painter.fillPath(path, QColor(255, 255, 255, 100))
+        # 根据焦点状态设置不同的背景颜色
+        if self.has_focus:
+            painter.fillPath(path, QColor(255, 255, 255, 130))
+            
+            # 绘制发光边框
+            glow_pen = QPen(QColor(0, 191, 255, 100), 2)
+            painter.setPen(glow_pen)
+            painter.drawPath(path)
+        else:
+            # 半透明背景
+            painter.fillPath(path, QColor(255, 255, 255, 100))
         
         # 调用原始绘制方法来绘制文本
         super().paintEvent(event)
