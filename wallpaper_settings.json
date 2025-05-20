@@ -1,0 +1,13 @@
+{
+    "netease_music_path": "D:\\CloudMusic\\cloudmusic.exe",
+    "everything_path": "D:\\BaiscTools\\Everything\\Everything.exe",
+    "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "bg_color": {
+        "r": 0,
+        "g": 0,
+        "b": 0,
+        "a": 120
+    },
+    "autostart": false,
+    "default_search_engine": "everything"
+}
