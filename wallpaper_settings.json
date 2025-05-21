@@ -9,5 +9,27 @@
         "a": 120
     },
     "autostart": false,
-    "default_search_engine": "everything"
+    "default_search_engine": "bilibili",
+    "quick_tools": [
+        {
+            "name": "VS Code",
+            "path": "C:\\Program Files\\Microsoft VS Code\\Code.exe",
+            "icon": "💻"
+        },
+        {
+            "name": "Terminal",
+            "path": "C:\\Windows\\System32\\cmd.exe",
+            "icon": "🖥️"
+        },
+        {
+            "name": "计算器",
+            "path": "C:\\Windows\\System32\\calc.exe",
+            "icon": "🧮"
+        },
+        {
+            "name": "记事本",
+            "path": "C:\\Windows\\System32\\notepad.exe",
+            "icon": "📝"
+        }
+    ]
 }

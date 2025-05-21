@@ -604,7 +604,7 @@ class SettingsDialog(QDialog):
         search_engine_layout = QHBoxLayout()
         search_engine_layout.addWidget(QLabel("默认搜索引擎:"))
         self.search_engine_combo = QComboBox()
-        self.search_engine_combo.addItems(["Everything", "Bing", "ChatGPT"])
+        self.search_engine_combo.addItems(["Everything", "Bing", "ChatGPT", "Bilibili"])
         search_engine_layout.addWidget(self.search_engine_combo)
         layout.addLayout(search_engine_layout)
         
@@ -725,7 +725,8 @@ class AcrylicWidget(QWidget):
         self.search_engines = {
             "everything": {"name": "Everything", "icon": "🔍", "action": self.search_everything},
             "bing": {"name": "Bing", "icon": "🌐", "action": self.search_bing},
-            "chatgpt": {"name": "ChatGPT", "icon": "🤖", "action": self.search_chatgpt}
+            "chatgpt": {"name": "ChatGPT", "icon": "🤖", "action": self.search_chatgpt},
+            "bilibili": {"name": "Bilibili", "icon": "📺", "action": self.search_bilibili},
         }
         
         # 当前搜索引擎
@@ -1105,6 +1106,14 @@ class AcrylicWidget(QWidget):
         query = self.search_input.text().strip()
         if query:
             url = f"https://www.bing.com/search?q={query}"
+            self.open_browser(url)
+            self.search_input.clear()
+
+    def search_bilibili(self):
+        """使用Bilibili搜索"""
+        query = self.search_input.text().strip()
+        if query:
+            url = f"https://search.bilibili.com/all?keyword={query}"
             self.open_browser(url)
             self.search_input.clear()
     
