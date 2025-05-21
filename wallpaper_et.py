@@ -42,7 +42,8 @@ DEFAULT_SETTINGS = {
         {"name": "计算器", "path": "C:\\Windows\\System32\\calc.exe", "icon": "🧮"},
         {"name": "记事本", "path": "C:\\Windows\\System32\\notepad.exe", "icon": "📝"}
     ],
-    "notes": ""  # 用于存储快速笔记内容
+    "notes": "",  # 用于存储快速笔记内容
+    "initial_position": {"x": None, "y": None}  # 添加初始位置配置
 }
 
 def save_settings(settings):
@@ -706,6 +707,11 @@ class AcrylicWidget(QWidget):
         
         # 加载设置
         self.settings = load_settings()
+
+        # 应用初始位置设置
+        initial_pos = self.settings.get("initial_position", {"x": None, "y": None})
+        if initial_pos["x"] is not None and initial_pos["y"] is not None:
+            self.move(initial_pos["x"], initial_pos["y"])
         
         # 设置默认路径和颜色
         self.netease_music_path = self.settings["netease_music_path"]
@@ -811,7 +817,7 @@ class AcrylicWidget(QWidget):
     def init_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.MSWindowsFixedSizeDialogHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(300, 200)  # 增加宽度以提供更多空间
+        self.setFixedSize(340, 200)  # 增加宽度以提供更多空间
         
         # 设置字体
         font_time = QFont("Caveat", 36, QFont.Weight.Bold)
@@ -906,23 +912,23 @@ class AcrylicWidget(QWidget):
         # 添加网易云音乐按钮 - 移到右上角
         self.music_button = MusicButton(self)
         self.music_button.setFixedSize(30, 30)
-        self.music_button.move(260, 20)
+        self.music_button.move(self.width() - 40, 20)
         self.music_button.clicked.connect(self.open_netease_music)
         
         # 添加音乐控制按钮 - 竖直排列在右侧，更加紧凑
         # 上一曲按钮
         self.prev_button = MediaControlButton("△", "上一曲", self)
-        self.prev_button.move(265, 60)
+        self.prev_button.move(self.width() - 40, 60)
         self.prev_button.clicked.connect(self.prev_track)
         
         # 播放/暂停按钮
         self.play_pause_button = MediaControlButton("◼", "播放/暂停", self)
-        self.play_pause_button.move(265, 90)
+        self.play_pause_button.move(self.width() - 40, 90)
         self.play_pause_button.clicked.connect(self.play_pause_music)
         
         # 下一曲按钮
         self.next_button = MediaControlButton("▽", "下一曲", self)
-        self.next_button.move(265, 120)
+        self.next_button.move(self.width() - 40, 120)
         self.next_button.clicked.connect(self.next_track)
 
         # 添加下拉按钮
@@ -1304,7 +1310,11 @@ class AcrylicWidget(QWidget):
         # 添加菜单项
         show_hide_action = menu.addAction("隐藏到托盘")
         show_hide_action.triggered.connect(self.hide)
-            
+
+        set_position_action = QAction("记录初始位置", self)
+        set_position_action.triggered.connect(self.set_current_position_as_initial)
+        menu.addAction(set_position_action)
+
         settings_action = menu.addAction("设置")
         settings_action.triggered.connect(self.open_settings)
             
@@ -1316,6 +1326,13 @@ class AcrylicWidget(QWidget):
         # 显示菜单
         menu.exec(event.globalPos())
     
+    def set_current_position_as_initial(self):
+        """设置当前位置为初始位置"""
+        current_pos = self.pos()
+        self.settings["initial_position"] = {"x": current_pos.x(), "y": current_pos.y()}
+        save_settings(self.settings)
+        QApplication.beep()
+
     def open_settings(self):
         """打开设置对话框"""
         dialog = SettingsDialog(self)

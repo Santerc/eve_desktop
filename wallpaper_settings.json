@@ -31,5 +31,9 @@
             "path": "C:\\Windows\\System32\\notepad.exe",
             "icon": "📝"
         }
-    ]
+    ],
+    "initial_position": {
+        "x": 1270,
+        "y": -1
+    }
 }
