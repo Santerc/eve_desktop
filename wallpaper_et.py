@@ -1926,6 +1926,15 @@ class MemoDialog(QDialog):
         
         # 更新按钮状态
         self.selection_changed()
+        
+        # 保存到设置文件
+        if hasattr(self.parent(), 'settings'):
+            parent_settings = self.parent().settings
+            # 更新父窗口设置中的备忘录
+            parent_memos = parent_settings.get('memos', [])
+            if index < len(parent_memos):
+                parent_memos[index] = memo
+                save_settings(parent_settings)
 
 class ReminderDialog(QDialog):
     def __init__(self, memo, parent=None):
@@ -2033,6 +2042,8 @@ class ReminderManager(QObject):
         
         print(f"检查提醒 - 当前时间: {current_time.strftime('%H:%M:%S')}, 备忘录数量: {len(memos)}")
         
+        settings_changed = False  # 标记设置是否有变化
+        
         for i, memo in enumerate(memos):
             reminder_time = memo.get('reminder_time')
             if not reminder_time:
@@ -2052,17 +2063,21 @@ class ReminderManager(QObject):
                     self.show_reminder(memo)
                     # 标记为已提醒
                     memo['reminder_shown'] = True
-                    save_settings(settings)
+                    settings_changed = True
                 
                 # 检查是否需要提前提醒（只有在还没到正式提醒时间时才显示）
                 elif advance_time >= reminder_dt and not memo.get('advance_shown'):
                     print(f"触发提前提醒: {memo.get('title', '无标题')}")
                     self.show_advance_reminder(memo, advance_minutes)
                     memo['advance_shown'] = True
-                    save_settings(settings)
+                    settings_changed = True
                     
             except Exception as e:
                 print(f"处理提醒时间失败: {e}")
+        
+        # 如果有设置变化，保存到文件
+        if settings_changed:
+            save_settings(settings)
     
     def show_reminder(self, memo):
         """显示提醒对话框"""
@@ -2263,6 +2278,19 @@ class CustomDateTimeEdit(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon("./icon.ico")) 
+    
+    # 设置全局工具提示样式 - 白底黑字
+    app.setStyleSheet("""
+        QToolTip {
+            background-color: white;
+            color: white;
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+    """)
+    
     widget = AcrylicWidget()
     widget.show()
     sys.exit(app.exec())
