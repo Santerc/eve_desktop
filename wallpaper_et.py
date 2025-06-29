@@ -14,6 +14,18 @@ from PyQt6.QtWidgets import QTextEdit, QToolButton, QScrollArea, QFrame, QDateTi
 from datetime import datetime, timedelta
 
 import ctypes
+import numpy as np
+import threading
+import time
+
+# 音频捕获相关
+try:
+    import pyaudio
+    import wave
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
+    print("警告: pyaudio未安装，音乐波形功能将不可用")
 
 user32 = ctypes.windll.user32
 VK_MEDIA_PLAY_PAUSE = 0xB3  # 播放/暂停媒体键
@@ -49,6 +61,12 @@ DEFAULT_SETTINGS = {
         "advance_minutes": 5,  # 提前提醒时间（分钟）
         "enable_sound": True,  # 是否启用声音提醒
         "enable_popup": True   # 是否启用弹窗提醒
+    },
+    "audio_waveform": {
+        "enable_waveform": True,  # 是否启用音频波形
+        "waveform_color": {"r": 0, "g": 191, "b": 255, "a": 180},  # 波形颜色
+        "waveform_speed": 0.8,  # 波形动画速度
+        "waveform_sensitivity": 1.0  # 波形灵敏度
     }
 }
 
@@ -799,6 +817,14 @@ class AcrylicWidget(QWidget):
         
         # 初始化提醒管理器
         self.reminder_manager = ReminderManager(self)
+        
+        # 初始化音频可视化器
+        if AUDIO_AVAILABLE:
+            self.audio_visualizer = AudioVisualizer(self)
+            self.frequency_data = []
+        else:
+            self.audio_visualizer = None
+            self.frequency_data = np.zeros(64)  # 默认空频域数据
 
     def init_tray_icon(self):
         """初始化系统托盘图标"""
@@ -869,6 +895,10 @@ class AcrylicWidget(QWidget):
 
     def close_app(self):
         """完全关闭应用程序"""
+        # 停止音频可视化器
+        if hasattr(self, 'audio_visualizer') and self.audio_visualizer:
+            self.audio_visualizer.stop()
+        
         # 如果边栏已创建，关闭边栏
         if hasattr(self, 'sidebar'):
             self.sidebar.close()
@@ -1544,6 +1574,9 @@ class AcrylicWidget(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.rect(), 20, 20)
         
+        # 绘制音频波形
+        self.draw_audio_waveform(painter)
+        
         # 搜索区域背景
         search_rect = QRectF(15, 155, 250, 35)
         search_color = QColor(30, 30, 30, 100)  # 稍微深一点的半透明背景
@@ -1555,6 +1588,53 @@ class AcrylicWidget(QWidget):
         music_color = QColor(30, 30, 40, 80)  # 半透明背景
         painter.setBrush(music_color)
         painter.drawRoundedRect(music_rect, 12, 12)
+    
+    def draw_audio_waveform(self, painter):
+        """绘制音频波形"""
+        if not hasattr(self, 'settings') or not self.settings.get('audio_waveform', {}).get('enable_waveform', True):
+            return
+        
+        # 获取波形设置
+        waveform_settings = self.settings.get('audio_waveform', {})
+        color_settings = waveform_settings.get('waveform_color', {'r': 0, 'g': 191, 'b': 255, 'a': 180})
+        sensitivity = waveform_settings.get('waveform_sensitivity', 1.0)
+        
+        # 获取当前频域数据
+        if self.audio_visualizer and self.audio_visualizer.is_running:
+            self.frequency_data = self.audio_visualizer.get_frequency_data()
+        
+        # 绘制频域柱状图（在底部）
+        if len(self.frequency_data) > 0:
+            painter.setPen(Qt.PenStyle.NoPen)
+            
+            # 获取窗口尺寸
+            width = self.width()
+            height = self.height()
+            
+            # 柱状图参数
+            bar_height = 40
+            bar_width = width / len(self.frequency_data)
+            bar_y = height - bar_height - 10  # 距离底部10px
+            
+            for i, freq in enumerate(self.frequency_data):
+                adjusted_freq = freq * sensitivity
+                bar_x = i * bar_width
+                bar_w = bar_width * 0.8
+                bar_h = adjusted_freq * bar_height
+                
+                # 创建颜色渐变效果
+                alpha = int(color_settings['a'] * (0.3 + 0.7 * adjusted_freq))
+                bar_color = QColor(
+                    color_settings['r'],
+                    color_settings['g'], 
+                    color_settings['b'],
+                    alpha
+                )
+                painter.setBrush(bar_color)
+                
+                # 绘制柱状图
+                bar_rect = QRectF(bar_x + bar_width * 0.1, bar_y + bar_height - bar_h, bar_w, bar_h)
+                painter.drawRoundedRect(bar_rect, 3, 3)
     
     def update_info(self):
         now = datetime.now()
@@ -1568,6 +1648,10 @@ class AcrylicWidget(QWidget):
             self.battery_label.setText(f"{status} Battery: {level}%")
         else:
             self.battery_label.setText("Battery: N/A")
+        
+        # 更新波形显示 - 已由专门的30FPS定时器处理
+        # if hasattr(self, 'settings') and self.settings.get('audio_waveform', {}).get('enable_waveform', True):
+        #     self.update()
     
     def search_everything(self):
         """使用 Everything 搜索输入的内容"""
@@ -2274,6 +2358,167 @@ class CustomDateTimeEdit(QWidget):
                     child_item = item.itemAt(j)
                     if child_item.widget():
                         child_item.widget().setEnabled(enabled)
+
+# 音频波形分析类
+class AudioVisualizer:
+    def __init__(self, parent=None):
+        self.parent = parent
+        self.audio = None
+        self.stream = None
+        self.is_running = False
+        self.audio_data = []
+        self.frequency_data = []
+        self.max_frequencies = 64  # 频域数据点数
+        
+        # 音频设置
+        self.CHUNK = 1024  # 减小chunk大小以获得更快的响应
+        self.FORMAT = pyaudio.paFloat32
+        self.CHANNELS = 2
+        self.RATE = 44100
+        
+        # 添加可视化更新定时器
+        self.visual_timer = QTimer()
+        self.visual_timer.timeout.connect(self.update_visualization)
+        self.visual_timer.start(33)  # 30FPS = 33ms间隔
+        
+        if AUDIO_AVAILABLE:
+            self.init_audio()
+    
+    def init_audio(self):
+        """初始化音频捕获"""
+        try:
+            self.audio = pyaudio.PyAudio()
+            
+            # 获取音频设备信息
+            info = self.audio.get_host_api_info_by_index(0)
+            numdevices = info.get('deviceCount')
+            
+            print(f"发现 {numdevices} 个音频设备:")
+            input_devices = []
+            
+            for i in range(numdevices):
+                device_info = self.audio.get_device_info_by_host_api_device_index(0, i)
+                if device_info.get('maxInputChannels') > 0:  # 只显示输入设备
+                    device_name = device_info.get('name')
+                    input_devices.append((i, device_name))
+                    print(f"  输入设备 {i}: {device_name}")
+            
+            # 专门寻找立体声混音设备
+            selected_device = None
+            
+            # 立体声混音设备的关键词
+            stereo_mix_keywords = [
+                'stereo mix', '立体声混音', 'what u hear', 'loopback'
+            ]
+            
+            for device_id, device_name in input_devices:
+                device_lower = device_name.lower()
+                if any(keyword in device_lower for keyword in stereo_mix_keywords):
+                    selected_device = device_id
+                    print(f"找到立体声混音设备: {device_name} (ID: {device_id})")
+                    break
+            
+            # 如果没有找到立体声混音设备，提示用户启用
+            if selected_device is None:
+                print("未找到立体声混音设备！")
+                print("请按以下步骤启用立体声混音：")
+                print("1. 右键点击系统托盘的声音图标")
+                print("2. 选择'声音设置'")
+                print("3. 点击'声音控制面板'")
+                print("4. 在'录制'选项卡中，右键点击空白区域")
+                print("5. 选择'显示禁用的设备'")
+                print("6. 找到'立体声混音'，右键启用")
+                print("7. 重新启动应用程序")
+                print("音频可视化功能将暂时禁用")
+                self.is_running = False
+                return
+            
+            self.stream = self.audio.open(
+                format=self.FORMAT,
+                channels=self.CHANNELS,
+                rate=self.RATE,
+                input=True,
+                input_device_index=selected_device,  # 指定立体声混音设备
+                frames_per_buffer=self.CHUNK,
+                stream_callback=self.audio_callback
+            )
+            self.stream.start_stream()
+            self.is_running = True
+            print("音频捕获已启动，使用立体声混音设备，30FPS可视化更新")
+        except Exception as e:
+            print(f"音频捕获初始化失败: {e}")
+            self.is_running = False
+
+    def audio_callback(self, in_data, frame_count, time_info, status):
+        """音频数据回调"""
+        if self.is_running:
+            try:
+                # 将字节数据转换为numpy数组
+                audio_array = np.frombuffer(in_data, dtype=np.float32)
+                
+                # 计算频域数据
+                if len(audio_array) > 0:
+                    self.update_frequency_data(audio_array)
+                
+                return (in_data, pyaudio.paContinue)
+            except Exception as e:
+                print(f"音频处理错误: {e}")
+                return (in_data, pyaudio.paContinue)
+        else:
+            return (None, pyaudio.paComplete)
+    
+    def update_frequency_data(self, audio_data):
+        """更新频域数据 - 无滤波版本"""
+        try:
+            # 应用窗函数
+            window = np.hanning(len(audio_data))
+            windowed_data = audio_data * window
+            
+            # 计算FFT
+            fft_data = np.fft.fft(windowed_data)
+            fft_magnitude = np.abs(fft_data[:len(fft_data)//2])
+            
+            # 对数缩放以增强视觉效果
+            fft_magnitude = np.log10(fft_magnitude + 1)
+            
+            # 重采样到指定数量的频域点
+            if len(fft_magnitude) > self.max_frequencies:
+                # 使用插值重采样
+                indices = np.linspace(0, len(fft_magnitude)-1, self.max_frequencies)
+                self.frequency_data = np.interp(indices, np.arange(len(fft_magnitude)), fft_magnitude)
+            else:
+                # 如果数据点不够，用零填充
+                self.frequency_data = np.zeros(self.max_frequencies)
+                self.frequency_data[:len(fft_magnitude)] = fft_magnitude
+            
+            # 归一化到0-1范围
+            if np.max(self.frequency_data) > 0:
+                self.frequency_data = self.frequency_data / np.max(self.frequency_data)
+            
+        except Exception as e:
+            print(f"频域分析错误: {e}")
+            self.frequency_data = np.zeros(self.max_frequencies)
+
+    def update_visualization(self):
+        """更新可视化显示"""
+        if self.parent and hasattr(self.parent, 'update'):
+            self.parent.update()
+    
+    def get_frequency_data(self):
+        """获取当前频域数据"""
+        return self.frequency_data.copy()
+    
+    def stop(self):
+        """停止音频捕获"""
+        self.is_running = False
+        if self.visual_timer:
+            self.visual_timer.stop()
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        if self.audio:
+            self.audio.terminate()
+        print("音频捕获已停止")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
