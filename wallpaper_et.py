@@ -705,6 +705,9 @@ class AcrylicWidget(QWidget):
         super().__init__()
         self.is_playing = False  # 添加播放状态变量
         
+        # 启用拖放
+        self.setAcceptDrops(True)
+        
         # 加载设置
         self.settings = load_settings()
 
@@ -737,6 +740,9 @@ class AcrylicWidget(QWidget):
         
         # 当前搜索引擎
         self.current_search_engine = self.settings.get("default_search_engine", "everything")
+
+        # 左侧边栏状态
+        self.sidebar_expanded = False
 
         self.init_ui()
         self.init_tray_icon()  # 初始化系统托盘图标
@@ -801,18 +807,24 @@ class AcrylicWidget(QWidget):
                 self.show()
                 self.activateWindow()  # 激活窗口
     
-    def close_app(self):
-        """完全关闭应用程序"""
-        self.tray_icon.hide()  # 隐藏托盘图标
-        QApplication.quit()  # 退出应用程序
-    
     def closeEvent(self, event):
         """重写关闭事件，使窗口关闭时只是隐藏而不是退出"""
         if self.tray_icon.isVisible():
             self.hide()
+            # 如果边栏已展开，也隐藏边栏
+            if hasattr(self, 'sidebar_expanded') and self.sidebar_expanded:
+                self.sidebar.hide()
             event.ignore()  # 忽略关闭事件
         else:
             event.accept()  # 接受关闭事件，关闭应用程序
+
+    def close_app(self):
+        """完全关闭应用程序"""
+        # 如果边栏已创建，关闭边栏
+        if hasattr(self, 'sidebar'):
+            self.sidebar.close()
+        self.tray_icon.hide()  # 隐藏托盘图标
+        QApplication.quit()  # 退出应用程序
 
     def init_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.MSWindowsFixedSizeDialogHint)
@@ -950,6 +962,7 @@ class AcrylicWidget(QWidget):
         self.expand_button.setToolTip("展开/收起拓展功能")
         self.expand_button.clicked.connect(self.toggle_extension_panel)
         
+
         # 创建拓展功能面板（初始隐藏）
         self.extension_panel = QWidget(self)
         self.extension_panel.setStyleSheet("""
@@ -1150,6 +1163,17 @@ class AcrylicWidget(QWidget):
                 webbrowser.open(url)
         except Exception as e:
             print(f"打开浏览器失败: {e}")
+
+    # 添加窗口移动事件处理，确保边栏跟随主窗口移动
+    def moveEvent(self, event):
+        """窗口移动事件"""
+        super().moveEvent(event)
+        
+        # 如果边栏已展开，更新边栏位置
+        if hasattr(self, 'sidebar_expanded') and self.sidebar_expanded:
+            sidebar_x = self.x() - self.sidebar.width() - 10
+            sidebar_y = self.y() + 10
+            self.sidebar.move(sidebar_x, sidebar_y)
 
     def toggle_extension_panel(self):
         """切换拓展功能面板的显示/隐藏状态"""
