@@ -10,10 +10,10 @@ from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QCheckBox, QColorDialog, Q
 from PyQt6.QtWidgets import QSystemTrayIcon, QComboBox, QListWidget
 from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QPointF, QTimer, QSequentialAnimationGroup
 from PyQt6.QtGui import QPainterPath, QPainter, QColor, QBrush, QPen
-from PyQt6.QtWidgets import QTextEdit, QToolButton, QScrollArea, QFrame
+from PyQt6.QtWidgets import QTextEdit, QToolButton, QScrollArea, QFrame, QDateTimeEdit, QSpinBox
+from datetime import datetime, timedelta
 
 import ctypes
-from datetime import datetime
 
 user32 = ctypes.windll.user32
 VK_MEDIA_PLAY_PAUSE = 0xB3  # 播放/暂停媒体键
@@ -43,7 +43,13 @@ DEFAULT_SETTINGS = {
         {"name": "记事本", "path": "C:\\Windows\\System32\\notepad.exe", "icon": "📝"}
     ],
     "notes": "",  # 用于存储快速笔记内容
-    "initial_position": {"x": None, "y": None}  # 添加初始位置配置
+    "initial_position": {"x": None, "y": None},  # 添加初始位置配置
+    "memos": [],  # 备忘录列表
+    "reminder_settings": {
+        "advance_minutes": 5,  # 提前提醒时间（分钟）
+        "enable_sound": True,  # 是否启用声音提醒
+        "enable_popup": True   # 是否启用弹窗提醒
+    }
 }
 
 def save_settings(settings):
@@ -609,6 +615,38 @@ class SettingsDialog(QDialog):
         search_engine_layout.addWidget(self.search_engine_combo)
         layout.addLayout(search_engine_layout)
         
+        # 提醒设置
+        reminder_title = QLabel("提醒设置")
+        reminder_title.setFont(QFont("Caveat", 12, QFont.Weight.Bold))
+        reminder_title.setStyleSheet("color: #5f9ea0; margin-top: 10px;")
+        layout.addWidget(reminder_title)
+        
+        # 提前提醒时间设置
+        advance_layout = QHBoxLayout()
+        advance_layout.addWidget(QLabel("提前提醒时间(分钟):"))
+        self.advance_slider = QSlider(Qt.Orientation.Horizontal)
+        self.advance_slider.setMinimum(1)
+        self.advance_slider.setMaximum(60)
+        self.advance_slider.setValue(5)  # 默认5分钟
+        self.advance_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.advance_slider.setTickInterval(5)
+        self.advance_value_label = QLabel("5")
+        advance_layout.addWidget(self.advance_slider)
+        advance_layout.addWidget(self.advance_value_label)
+        layout.addLayout(advance_layout)
+        
+        # 连接滑动条的值变化信号
+        self.advance_slider.valueChanged.connect(self.update_advance_value)
+        
+        # 提醒选项
+        self.enable_sound_checkbox = QCheckBox("启用声音提醒")
+        self.enable_sound_checkbox.setChecked(True)
+        layout.addWidget(self.enable_sound_checkbox)
+        
+        self.enable_popup_checkbox = QCheckBox("启用弹窗提醒")
+        self.enable_popup_checkbox.setChecked(True)
+        layout.addWidget(self.enable_popup_checkbox)
+        
         # 确定取消按钮
         button_layout = QHBoxLayout()
         self.ok_button = QPushButton("确定")
@@ -699,6 +737,14 @@ class SettingsDialog(QDialog):
             self.everything_path = path
             self.everything_path_button.setText(path.split("/")[-1])
 
+    def update_advance_value(self, value):
+        """更新提前提醒时间值显示"""
+        self.advance_value_label.setText(str(value))
+        # 如果已经设置了提前提醒时间，更新提醒设置
+        if hasattr(self, 'advance_slider'):
+            self.settings["reminder_settings"]["advance_minutes"] = value
+            save_settings(self.settings)
+
 
 class AcrylicWidget(QWidget):
     def __init__(self):
@@ -750,6 +796,9 @@ class AcrylicWidget(QWidget):
         # 安装事件过滤器
         self.event_filter = EventFilter()
         self.installEventFilter(self.event_filter)
+        
+        # 初始化提醒管理器
+        self.reminder_manager = ReminderManager(self)
 
     def init_tray_icon(self):
         """初始化系统托盘图标"""
@@ -1023,6 +1072,35 @@ class AcrylicWidget(QWidget):
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setStyleSheet("background-color: rgba(100, 100, 120, 100);")
         extension_layout.addWidget(separator)
+        
+        # 添加备忘录标题和按钮
+        memo_layout = QHBoxLayout()
+        memo_title = QLabel("备忘录", self.extension_panel)
+        memo_title.setFont(QFont("Caveat", 14, QFont.Weight.Bold))
+        memo_title.setStyleSheet("color: rgba(200, 220, 255, 220);")
+        memo_layout.addWidget(memo_title)
+        
+        # 添加备忘录管理按钮
+        memo_button = QPushButton("📝", self.extension_panel)
+        memo_button.setToolTip("管理备忘录")
+        memo_button.setFixedSize(30, 30)
+        memo_button.setStyleSheet("""
+            QPushButton {
+                color: rgba(220, 220, 220, 220);
+                background-color: rgba(50, 50, 60, 150);
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 70, 80, 180);
+            }
+        """)
+        memo_button.clicked.connect(self.manage_memos)
+        memo_layout.addWidget(memo_button)
+        
+        # 添加弹性空间
+        memo_layout.addStretch()
+        extension_layout.addLayout(memo_layout)
         
         # 添加快速笔记标题
         notes_title = QLabel("快速笔记", self.extension_panel)
@@ -1311,6 +1389,15 @@ class AcrylicWidget(QWidget):
         self.settings["notes"] = self.notes_edit.toPlainText()
         save_settings(self.settings)
 
+    def manage_memos(self):
+        """管理备忘录"""
+        memos = self.settings.get("memos", [])
+        dialog = MemoDialog(memos, self)
+        if dialog.exec():
+            # 更新备忘录列表
+            self.settings["memos"] = dialog.memos
+            save_settings(self.settings)
+
     def contextMenuEvent(self, event):
         """处理右键菜单事件"""
         menu = QMenu(self)
@@ -1388,6 +1475,13 @@ class AcrylicWidget(QWidget):
                 dialog.search_engine_combo.setCurrentIndex(i)
                 break
         
+        # 设置提醒设置
+        reminder_settings = self.settings.get("reminder_settings", DEFAULT_SETTINGS["reminder_settings"])
+        dialog.advance_slider.setValue(reminder_settings.get("advance_minutes", 5))
+        dialog.advance_value_label.setText(str(reminder_settings.get("advance_minutes", 5)))
+        dialog.enable_sound_checkbox.setChecked(reminder_settings.get("enable_sound", True))
+        dialog.enable_popup_checkbox.setChecked(reminder_settings.get("enable_popup", True))
+        
         if dialog.exec():
             # 保存自启动设置
             autostart = dialog.autostart_checkbox.isChecked()
@@ -1430,6 +1524,13 @@ class AcrylicWidget(QWidget):
                     self.search_icon_button.setToolTip(f"当前搜索引擎: {engine['name']}")
                     self.search_input.setPlaceholderText(f"Search with {engine['name']}...")
                     break
+            
+            # 保存提醒设置
+            self.settings["reminder_settings"] = {
+                "advance_minutes": dialog.advance_slider.value(),
+                "enable_sound": dialog.enable_sound_checkbox.isChecked(),
+                "enable_popup": dialog.enable_popup_checkbox.isChecked()
+            }
             
             # 保存设置
             save_settings(self.settings)
@@ -1522,6 +1623,642 @@ class AcrylicWidget(QWidget):
             self.move(self.pos() + delta)
             self.drag_position = event.globalPosition().toPoint()
             event.accept()
+
+class MemoDialog(QDialog):
+    def __init__(self, memos, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("备忘录管理")
+        self.setFixedSize(600, 500)
+        
+        # 复制备忘录列表
+        self.memos = memos.copy()
+        
+        # 设置窗口样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2c2c2c;
+                color: white;
+            }
+            QLabel {
+                color: white;
+            }
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+            QLineEdit, QTextEdit {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 3px;
+            }
+            QListWidget {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555555;
+                border-radius: 3px;
+            }
+            QListWidget::item:selected {
+                background-color: #5f9ea0;
+            }
+            QCheckBox {
+                color: white;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 1px solid #555555;
+                background-color: #3a3a3a;
+            }
+            QCheckBox::indicator:checked {
+                border: 1px solid #5f9ea0;
+                background-color: #5f9ea0;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        
+        # 添加使用提示
+        tip_label = QLabel("💡 提示：勾选'设置提醒'后可以设置提醒时间，应用会在指定时间前提醒您")
+        tip_label.setStyleSheet("color: #5f9ea0; font-size: 10px; padding: 5px;")
+        tip_label.setWordWrap(True)
+        layout.addWidget(tip_label)
+        
+        # 备忘录列表
+        self.memos_list = QListWidget()
+        self.update_memos_list()
+        layout.addWidget(self.memos_list)
+        
+        # 编辑区域
+        edit_layout = QVBoxLayout()
+        
+        # 标题输入
+        title_layout = QHBoxLayout()
+        title_layout.addWidget(QLabel("标题:"))
+        self.title_edit = QLineEdit()
+        title_layout.addWidget(self.title_edit)
+        edit_layout.addLayout(title_layout)
+        
+        # 内容输入
+        content_layout = QVBoxLayout()
+        content_layout.addWidget(QLabel("内容:"))
+        self.content_edit = QTextEdit()
+        self.content_edit.setMaximumHeight(80)
+        content_layout.addWidget(self.content_edit)
+        edit_layout.addLayout(content_layout)
+        
+        # 提醒时间设置
+        reminder_layout = QHBoxLayout()
+        self.reminder_checkbox = QCheckBox("设置提醒")
+        reminder_layout.addWidget(self.reminder_checkbox)
+        
+        reminder_layout.addWidget(QLabel("提醒时间:"))
+        self.datetime_edit = CustomDateTimeEdit()
+        self.datetime_edit.setDateTime(datetime.now())
+        self.datetime_edit.setEnabled(False)
+        reminder_layout.addWidget(self.datetime_edit)
+        
+        # 连接复选框信号
+        self.reminder_checkbox.toggled.connect(self.datetime_edit.setEnabled)
+        
+        edit_layout.addLayout(reminder_layout)
+        
+        layout.addLayout(edit_layout)
+        
+        # 按钮区域
+        buttons_layout = QHBoxLayout()
+        
+        self.add_button = QPushButton("添加")
+        self.add_button.clicked.connect(self.add_memo)
+        buttons_layout.addWidget(self.add_button)
+        
+        self.update_button = QPushButton("更新")
+        self.update_button.clicked.connect(self.update_memo)
+        self.update_button.setEnabled(False)
+        buttons_layout.addWidget(self.update_button)
+        
+        self.delete_button = QPushButton("删除")
+        self.delete_button.clicked.connect(self.delete_memo)
+        self.delete_button.setEnabled(False)
+        buttons_layout.addWidget(self.delete_button)
+        
+        self.reset_reminder_button = QPushButton("重置提醒")
+        self.reset_reminder_button.clicked.connect(self.reset_reminder)
+        self.reset_reminder_button.setEnabled(False)
+        self.reset_reminder_button.setToolTip("重置已提醒状态，允许再次提醒")
+        buttons_layout.addWidget(self.reset_reminder_button)
+        
+        layout.addLayout(buttons_layout)
+        
+        # 确定取消按钮
+        dialog_buttons = QHBoxLayout()
+        self.ok_button = QPushButton("确定")
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.clicked.connect(self.reject)
+        dialog_buttons.addWidget(self.ok_button)
+        dialog_buttons.addWidget(self.cancel_button)
+        layout.addLayout(dialog_buttons)
+        
+        self.setLayout(layout)
+        
+        # 连接列表选择信号
+        self.memos_list.itemSelectionChanged.connect(self.selection_changed)
+        self.memos_list.itemDoubleClicked.connect(self.item_double_clicked)
+    
+    def update_memos_list(self):
+        """更新备忘录列表显示"""
+        self.memos_list.clear()
+        for memo in self.memos:
+            title = memo.get('title', '无标题')
+            reminder_time = memo.get('reminder_time')
+            reminder_shown = memo.get('reminder_shown', False)
+            
+            if reminder_time:
+                if reminder_shown:
+                    reminder_str = f" (提醒: {reminder_time} - 已提醒)"
+                else:
+                    reminder_str = f" (提醒: {reminder_time} - 待提醒)"
+            else:
+                reminder_str = ""
+            self.memos_list.addItem(f"📝 {title}{reminder_str}")
+    
+    def selection_changed(self):
+        """列表选择变化处理"""
+        has_selection = len(self.memos_list.selectedItems()) > 0
+        self.update_button.setEnabled(has_selection)
+        self.delete_button.setEnabled(has_selection)
+        
+        # 检查是否有提醒时间且已提醒过
+        if has_selection:
+            index = self.memos_list.currentRow()
+            memo = self.memos[index]
+            has_reminder = bool(memo.get('reminder_time'))
+            reminder_shown = memo.get('reminder_shown', False)
+            self.reset_reminder_button.setEnabled(has_reminder and reminder_shown)
+        else:
+            self.reset_reminder_button.setEnabled(False)
+        
+        if has_selection:
+            index = self.memos_list.currentRow()
+            memo = self.memos[index]
+            self.title_edit.setText(memo.get('title', ''))
+            self.content_edit.setText(memo.get('content', ''))
+            
+            # 设置提醒时间
+            reminder_time = memo.get('reminder_time')
+            if reminder_time:
+                try:
+                    dt = datetime.fromisoformat(reminder_time)
+                    self.datetime_edit.setDateTime(dt)
+                    self.reminder_checkbox.setChecked(True)
+                except:
+                    self.reminder_checkbox.setChecked(False)
+            else:
+                self.reminder_checkbox.setChecked(False)
+    
+    def item_double_clicked(self, item):
+        """双击列表项处理"""
+        index = self.memos_list.row(item)
+        memo = self.memos[index]
+        self.title_edit.setText(memo.get('title', ''))
+        self.content_edit.setText(memo.get('content', ''))
+        
+        # 设置提醒时间
+        reminder_time = memo.get('reminder_time')
+        if reminder_time:
+            try:
+                dt = datetime.fromisoformat(reminder_time)
+                self.datetime_edit.setDateTime(dt)
+                self.reminder_checkbox.setChecked(True)
+            except:
+                self.reminder_checkbox.setChecked(False)
+        else:
+            self.reminder_checkbox.setChecked(False)
+    
+    def add_memo(self):
+        """添加新备忘录"""
+        title = self.title_edit.text().strip()
+        content = self.content_edit.toPlainText().strip()
+        
+        if not title:
+            return
+        
+        memo = {
+            'title': title,
+            'content': content,
+            'created_time': datetime.now().isoformat()
+        }
+        
+        # 添加提醒时间
+        if self.reminder_checkbox.isChecked():
+            memo['reminder_time'] = self.datetime_edit.dateTime().isoformat()
+        
+        self.memos.append(memo)
+        self.update_memos_list()
+        
+        # 清空输入框
+        self.title_edit.clear()
+        self.content_edit.clear()
+        self.reminder_checkbox.setChecked(False)
+    
+    def update_memo(self):
+        """更新选中的备忘录"""
+        if not self.memos_list.selectedItems():
+            return
+        
+        index = self.memos_list.currentRow()
+        title = self.title_edit.text().strip()
+        content = self.content_edit.toPlainText().strip()
+        
+        if not title:
+            return
+        
+        memo = {
+            'title': title,
+            'content': content,
+            'created_time': self.memos[index].get('created_time', datetime.now().isoformat())
+        }
+        
+        # 添加提醒时间
+        if self.reminder_checkbox.isChecked():
+            memo['reminder_time'] = self.datetime_edit.dateTime().isoformat()
+        
+        self.memos[index] = memo
+        self.update_memos_list()
+    
+    def delete_memo(self):
+        """删除选中的备忘录"""
+        if not self.memos_list.selectedItems():
+            return
+        
+        index = self.memos_list.currentRow()
+        del self.memos[index]
+        self.update_memos_list()
+        
+        # 清空输入框
+        self.title_edit.clear()
+        self.content_edit.clear()
+        self.reminder_checkbox.setChecked(False)
+
+    def reset_reminder(self):
+        """重置提醒状态"""
+        if not self.memos_list.selectedItems():
+            return
+        
+        index = self.memos_list.currentRow()
+        memo = self.memos[index]
+        
+        # 重置提醒状态
+        memo['reminder_shown'] = False
+        memo['advance_shown'] = False
+        
+        self.update_memos_list()
+        
+        # 更新按钮状态
+        self.selection_changed()
+
+class ReminderDialog(QDialog):
+    def __init__(self, memo, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("备忘录提醒")
+        self.setFixedSize(400, 200)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        # 设置窗口样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2c2c2c;
+                color: white;
+                border: 2px solid #5f9ea0;
+                border-radius: 10px;
+            }
+            QLabel {
+                color: white;
+            }
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border: none;
+                padding: 8px 15px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+            QTextEdit {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555555;
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        
+        # 标题
+        title_label = QLabel(f"⏰ 备忘录提醒: {memo.get('title', '无标题')}")
+        title_label.setFont(QFont("Caveat", 14, QFont.Weight.Bold))
+        title_label.setStyleSheet("color: #5f9ea0;")
+        layout.addWidget(title_label)
+        
+        # 内容
+        content_label = QLabel("内容:")
+        layout.addWidget(content_label)
+        
+        content_edit = QTextEdit()
+        content_edit.setPlainText(memo.get('content', ''))
+        content_edit.setReadOnly(True)
+        content_edit.setMaximumHeight(80)
+        layout.addWidget(content_edit)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        
+        snooze_button = QPushButton("稍后提醒 (5分钟)")
+        snooze_button.clicked.connect(lambda: self.snooze_reminder(5))
+        button_layout.addWidget(snooze_button)
+        
+        dismiss_button = QPushButton("关闭")
+        dismiss_button.clicked.connect(self.accept)
+        button_layout.addWidget(dismiss_button)
+        
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+        
+        # 存储备忘录信息
+        self.memo = memo
+    
+    def snooze_reminder(self, minutes):
+        """稍后提醒"""
+        # 更新提醒时间
+        new_time = datetime.now() + timedelta(minutes=minutes)
+        self.memo['reminder_time'] = new_time.isoformat()
+        self.accept()
+
+class ReminderManager(QObject):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.reminder_timer = QTimer()
+        self.reminder_timer.timeout.connect(self.check_reminders)
+        self.reminder_timer.start(30000)  # 每30秒检查一次
+        print("提醒管理器已初始化，每30秒检查一次提醒")
+    
+    def check_reminders(self):
+        """检查备忘录提醒"""
+        if not hasattr(self.parent, 'settings'):
+            print("警告：父窗口没有settings属性")
+            return
+        
+        # 重新加载settings以确保获取最新数据
+        self.parent.settings = load_settings()
+        settings = self.parent.settings
+        memos = settings.get('memos', [])
+        reminder_settings = settings.get('reminder_settings', {})
+        advance_minutes = reminder_settings.get('advance_minutes', 5)
+        
+        current_time = datetime.now()
+        advance_time = current_time + timedelta(minutes=advance_minutes)
+        
+        print(f"检查提醒 - 当前时间: {current_time.strftime('%H:%M:%S')}, 备忘录数量: {len(memos)}")
+        
+        for i, memo in enumerate(memos):
+            reminder_time = memo.get('reminder_time')
+            if not reminder_time:
+                continue
+            
+            try:
+                reminder_dt = datetime.fromisoformat(reminder_time)
+                print(f"备忘录 {i+1}: {memo.get('title', '无标题')} - 提醒时间: {reminder_dt.strftime('%H:%M:%S')}")
+                print(f"时间比较: 当前={current_time}, 提醒={reminder_dt}, 提前={advance_time}")
+                print(f"是否到了提醒时间: {current_time >= reminder_dt}")
+                print(f"是否需要提前提醒: {advance_time >= reminder_dt and not memo.get('advance_shown')}")
+                print(f"是否已经提醒过: {memo.get('reminder_shown', False)}")
+                
+                # 检查是否到了提醒时间且还没显示过提醒
+                if current_time >= reminder_dt and not memo.get('reminder_shown', False):
+                    print(f"触发正式提醒: {memo.get('title', '无标题')}")
+                    self.show_reminder(memo)
+                    # 标记为已提醒
+                    memo['reminder_shown'] = True
+                    save_settings(settings)
+                
+                # 检查是否需要提前提醒（只有在还没到正式提醒时间时才显示）
+                elif advance_time >= reminder_dt and not memo.get('advance_shown'):
+                    print(f"触发提前提醒: {memo.get('title', '无标题')}")
+                    self.show_advance_reminder(memo, advance_minutes)
+                    memo['advance_shown'] = True
+                    save_settings(settings)
+                    
+            except Exception as e:
+                print(f"处理提醒时间失败: {e}")
+    
+    def show_reminder(self, memo):
+        """显示提醒对话框"""
+        if not hasattr(self.parent, 'settings'):
+            return
+        
+        settings = self.parent.settings
+        reminder_settings = settings.get('reminder_settings', {})
+        
+        print(f"显示提醒对话框: {memo.get('title', '无标题')}")
+        
+        # 显示弹窗提醒
+        if reminder_settings.get('enable_popup', True):
+            dialog = ReminderDialog(memo, self.parent)
+            dialog.exec()
+        
+        # 播放声音提醒
+        if reminder_settings.get('enable_sound', True):
+            QApplication.beep()
+    
+    def show_advance_reminder(self, memo, advance_minutes):
+        """显示提前提醒"""
+        if not hasattr(self.parent, 'settings'):
+            return
+        
+        settings = self.parent.settings
+        reminder_settings = settings.get('reminder_settings', {})
+        
+        print(f"显示提前提醒: {memo.get('title', '无标题')}")
+        
+        # 显示提前提醒弹窗
+        if reminder_settings.get('enable_popup', True):
+            advance_dialog = QDialog(self.parent)
+            advance_dialog.setWindowTitle("")
+            advance_dialog.setFixedSize(300, 150)
+            advance_dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+            
+            advance_dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #2c2c2c;
+                    color: white;
+                    border: 2px solid #ffa500;
+                    border-radius: 10px;
+                }
+                QLabel {
+                    color: white;
+                }
+                QPushButton {
+                    background-color: #3a3a3a;
+                    color: white;
+                    border: none;
+                    padding: 5px 10px;
+                    border-radius: 3px;
+                }
+                QPushButton:hover {
+                    background-color: #4a4a4a;
+                }
+            """)
+            
+            layout = QVBoxLayout()
+            
+            title_label = QLabel(f"⏰ {advance_minutes}分钟后有备忘录提醒")
+            title_label.setFont(QFont("Caveat", 12, QFont.Weight.Bold))
+            title_label.setStyleSheet("color: #ffa500;")
+            layout.addWidget(title_label)
+            
+            content_label = QLabel(f"标题: {memo.get('title', '无标题')}")
+            layout.addWidget(content_label)
+            
+            ok_button = QPushButton("知道了")
+            ok_button.clicked.connect(advance_dialog.accept)
+            layout.addWidget(ok_button)
+            
+            advance_dialog.setLayout(layout)
+            advance_dialog.exec()
+        
+        # 播放声音提醒
+        if reminder_settings.get('enable_sound', True):
+            QApplication.beep()
+
+class CustomDateTimeEdit(QWidget):
+    """自定义日期时间选择器 - 简化版本"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        
+        # 时间输入框
+        self.time_edit = QLineEdit()
+        self.time_edit.setPlaceholderText("2025-06-12 14:30")
+        self.time_edit.setFixedWidth(150)
+        self.time_edit.setText(datetime.now().strftime("%Y-%m-%d %H:%M"))
+        layout.addWidget(self.time_edit)
+        
+        # 快速时间按钮
+        quick_layout = QHBoxLayout()
+        quick_layout.setSpacing(2)
+        
+        # 5分钟后
+        btn_5min = QPushButton("5分钟")
+        btn_5min.setFixedSize(50, 25)
+        btn_5min.clicked.connect(lambda: self.set_quick_time(5))
+        quick_layout.addWidget(btn_5min)
+        
+        # 10分钟后
+        btn_10min = QPushButton("10分钟")
+        btn_10min.setFixedSize(50, 25)
+        btn_10min.clicked.connect(lambda: self.set_quick_time(10))
+        quick_layout.addWidget(btn_10min)
+        
+        # 30分钟后
+        btn_30min = QPushButton("30分钟")
+        btn_30min.setFixedSize(50, 25)
+        btn_30min.clicked.connect(lambda: self.set_quick_time(30))
+        quick_layout.addWidget(btn_30min)
+        
+        # 1小时后
+        btn_1hour = QPushButton("1小时")
+        btn_1hour.setFixedSize(50, 25)
+        btn_1hour.clicked.connect(lambda: self.set_quick_time(60))
+        quick_layout.addWidget(btn_1hour)
+        
+        layout.addLayout(quick_layout)
+        self.setLayout(layout)
+        
+        # 设置样式
+        self.setStyleSheet("""
+            QLineEdit {
+                background-color: #3a3a3a;
+                color: white;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 5px;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #5f9ea0;
+            }
+            QPushButton {
+                background-color: #4a4a4a;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+            QPushButton:pressed {
+                background-color: #3a3a3a;
+            }
+        """)
+    
+    def set_quick_time(self, minutes):
+        """设置快速时间"""
+        future_time = datetime.now() + timedelta(minutes=minutes)
+        self.time_edit.setText(future_time.strftime("%Y-%m-%d %H:%M"))
+    
+    def setDateTime(self, dt):
+        """设置日期时间"""
+        self.time_edit.setText(dt.strftime("%Y-%m-%d %H:%M"))
+    
+    def dateTime(self):
+        """获取日期时间"""
+        try:
+            time_str = self.time_edit.text().strip()
+            if not time_str:
+                return datetime.now()
+            
+            # 尝试解析时间字符串
+            if len(time_str) == 16:  # "2025-06-12 14:30" 格式
+                return datetime.strptime(time_str, "%Y-%m-%d %H:%M")
+            elif len(time_str) == 19:  # "2025-06-12 14:30:00" 格式
+                return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+            else:
+                # 如果格式不对，返回当前时间
+                return datetime.now()
+        except ValueError:
+            # 如果解析失败，返回当前时间
+            return datetime.now()
+    
+    def setEnabled(self, enabled):
+        """设置启用状态"""
+        super().setEnabled(enabled)
+        self.time_edit.setEnabled(enabled)
+        for i in range(self.layout().count()):
+            item = self.layout().itemAt(i)
+            if isinstance(item, QHBoxLayout):
+                for j in range(item.count()):
+                    child_item = item.itemAt(j)
+                    if child_item.widget():
+                        child_item.widget().setEnabled(enabled)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

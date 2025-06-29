@@ -36,5 +36,24 @@
         "x": 1270,
         "y": -1
     },
-    "notes": ""
+    "notes": "",
+    "memos": [
+        {
+            "title": "测试1",
+            "content": "111",
+            "created_time": "2025-06-29T12:59:28.652376"
+        },
+        {
+            "title": "测试正式提醒",
+            "content": "这是一个测试正式提醒的备忘录",
+            "created_time": "2025-06-29T13:25:00",
+            "reminder_time": "2025-06-29T13:37:00",
+            "advance_shown": true
+        }
+    ],
+    "reminder_settings": {
+        "advance_minutes": 5,
+        "enable_sound": true,
+        "enable_popup": true
+    }
 }
