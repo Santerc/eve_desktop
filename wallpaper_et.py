@@ -3,7 +3,7 @@ import psutil
 import subprocess
 import json
 import os
-from PyQt6.QtCore import Qt, QTimer, QPoint, QEvent, QObject, QRect, QRectF
+from PyQt6.QtCore import Qt, QTimer, QPoint, QEvent, QObject, QRect, QRectF, QSize
 from PyQt6.QtGui import QFont, QColor, QPainter, QGuiApplication, QPainterPath, QIcon, QAction
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QDialog, QMenu
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QCheckBox, QColorDialog, QFileDialog, QSlider
@@ -49,10 +49,10 @@ DEFAULT_SETTINGS = {
     "autostart": False,
     "default_search_engine": "everything",
     "quick_tools": [
-        {"name": "VS Code", "path": "C:\\Program Files\\Microsoft VS Code\\Code.exe", "icon": "💻"},
-        {"name": "Terminal", "path": "C:\\Windows\\System32\\cmd.exe", "icon": "🖥️"},
-        {"name": "计算器", "path": "C:\\Windows\\System32\\calc.exe", "icon": "🧮"},
-        {"name": "记事本", "path": "C:\\Windows\\System32\\notepad.exe", "icon": "📝"}
+        {"name": "VS Code", "path": "C:\\Program Files\\Microsoft VS Code\\Code.exe", "icon": "./icon.ico"},
+        {"name": "Terminal", "path": "C:\\Windows\\System32\\cmd.exe", "icon": "./icon.ico"},
+        {"name": "计算器", "path": "C:\\Windows\\System32\\calc.exe", "icon": "./icon.ico"},
+        {"name": "记事本", "path": "C:\\Windows\\System32\\notepad.exe", "icon": "./icon.ico"}
     ],
     "notes": "",  # 用于存储快速笔记内容
     "initial_position": {"x": None, "y": None},  # 添加初始位置配置
@@ -308,8 +308,14 @@ class QuickToolsDialog(QDialog):
         # 图标输入
         icon_layout = QVBoxLayout()
         icon_layout.addWidget(QLabel("图标:"))
+        icon_input_layout = QHBoxLayout()
         self.icon_edit = QLineEdit()
-        icon_layout.addWidget(self.icon_edit)
+        self.icon_edit.setPlaceholderText("输入emoji或选择图标文件")
+        icon_input_layout.addWidget(self.icon_edit)
+        self.browse_icon_button = QPushButton("选择图标...")
+        self.browse_icon_button.clicked.connect(self.browse_icon)
+        icon_input_layout.addWidget(self.browse_icon_button)
+        icon_layout.addLayout(icon_input_layout)
         edit_layout.addLayout(icon_layout)
         
         # 路径输入
@@ -406,6 +412,12 @@ class QuickToolsDialog(QDialog):
         self.icon_edit.setText(tool["icon"])
         self.path_edit.setText(tool["path"])
     
+
+    def browse_icon(self):
+        """浏览图标文件"""
+        path, _ = QFileDialog.getOpenFileName(self, "选择图标文件", "", "图标文件 (*.ico *.png *.jpg *.jpeg)")
+        if path:
+            self.icon_edit.setText(path)    
     def browse_path(self):
         """浏览文件路径"""
         path, _ = QFileDialog.getOpenFileName(self, "选择程序", "", "可执行文件 (*.exe)")
@@ -1339,9 +1351,30 @@ class AcrylicWidget(QWidget):
 
     def create_tool_button(self, tool):
         """创建工具快捷按钮"""
-        button = QPushButton(tool["icon"], self.tools_container)
+        button = QPushButton(self.tools_container)
         button.setToolTip(tool["name"])
         button.setFixedSize(40, 40)
+        
+        # 设置图标
+        icon_path = tool.get("icon", "")
+        if icon_path and (icon_path.endswith(('.ico', '.png', '.jpg', '.jpeg')) or os.path.exists(icon_path)):
+            # 如果是图标文件路径，加载图标
+            try:
+                if os.path.exists(icon_path):
+                    icon = QIcon(icon_path)
+                    button.setIcon(icon)
+                    button.setIconSize(QSize(24, 24))
+                    button.setText("")  # 清空文本
+                else:
+                    # 如果文件不存在，使用默认图标
+                    button.setText("🔧")
+            except Exception as e:
+                print(f"加载图标失败 {icon_path}: {e}")
+                button.setText("🔧")
+        else:
+            # 使用emoji或默认图标
+            button.setText(icon_path if icon_path else "🔧")
+        
         button.setStyleSheet("""
             QPushButton {
                 color: rgba(220, 220, 220, 220);
@@ -1364,7 +1397,6 @@ class AcrylicWidget(QWidget):
         button.clicked.connect(lambda: self.open_tool(tool["path"]))
         
         return button
-
     def open_tool(self, path):
         """打开工具"""
         try:

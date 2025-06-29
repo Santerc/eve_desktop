@@ -28,15 +28,15 @@
         },
         {
             "name": "记事本",
-            "path": "C:\\Windows\\System32\\notepad.exe",
-            "icon": "📝"
+            "icon": "D:/PyCharm/Application/bin/pycharm.ico",
+            "path": "C:\\Windows\\System32\\notepad.exe"
         }
     ],
     "initial_position": {
         "x": 1270,
         "y": -1
     },
-    "notes": "",
+    "notes": "test",
     "memos": [
         {
             "title": "测试1",

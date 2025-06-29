@@ -1,0 +1,11 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# packager
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+
