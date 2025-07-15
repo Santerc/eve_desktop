@@ -9,7 +9,7 @@
         "a": 120
     },
     "autostart": false,
-    "default_search_engine": "bilibili",
+    "default_search_engine": "bing",
     "quick_tools": [
         {
             "name": "VS Code",
@@ -33,10 +33,10 @@
         }
     ],
     "initial_position": {
-        "x": 1270,
-        "y": -1
+        "x": 705,
+        "y": 252
     },
-    "notes": "test",
+    "notes": "222",
     "memos": [
         {
             "title": "测试1",
